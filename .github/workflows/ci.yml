@@ -1,14 +1,18 @@
 name: ci
 on:
-  push:
-    branches:
-    - master
-  pull_request:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: Optional mocha --grep filter
+        required: false
+        default: ''
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         name:
         - Node.js 0.8
@@ -81,15 +85,17 @@ jobs:
 
         - name: Node.js 8.x
           node-version: "8"
-          npm-i: mocha@7.2.0 nyc@14.1.1
+          npm-i: mocha@7.2.0 formidable@2.1.2
+          npm-rm: nyc
 
         - name: Node.js 9.x
           node-version: "9"
-          npm-i: mocha@7.2.0 nyc@14.1.1
+          npm-i: mocha@7.2.0 formidable@2.1.2
+          npm-rm: nyc
 
         - name: Node.js 10.x
           node-version: "10"
-          npm-i: mocha@8.4.0
+          npm-i: mocha@8.4.0 formidable@2.1.2
 
         - name: Node.js 11.x
           node-version: "11"
@@ -97,17 +103,18 @@ jobs:
 
         - name: Node.js 12.x
           node-version: "12"
-          npm-i: mocha@9.2.2
+          npm-i: mocha@9.2.2 formidable@2.1.2
 
         - name: Node.js 13.x
           node-version: "13"
-          npm-i: mocha@9.2.2
+          npm-i: mocha@9.2.2 formidable@2.1.2
 
         - name: Node.js 14.x
           node-version: "14"
 
         - name: Node.js 15.x
           node-version: "15"
+          npm-i: formidable@2.1.2
 
         - name: Node.js 16.x
           node-version: "16"
@@ -189,56 +196,38 @@ jobs:
 
     - name: Run tests
       shell: bash
+      env:
+        TEST_FILTER: ${{ inputs.test-filter }}
       run: |
-        if npm -ps ls nyc | grep -q nyc; then
+        if [[ -n "$TEST_FILTER" ]]; then
+          npm test -- --grep "$TEST_FILTER"
+        elif npm -ps ls nyc | grep -q nyc; then
           npm run test-ci
           cp coverage/lcov.info "coverage/${{ matrix.name }}.lcov"
         else
           npm test
         fi
 
-    - name: Lint code
-      if: steps.list_env.outputs.eslint != ''
-      run: npm run lint
-
-    - name: Collect code coverage
-      if: steps.list_env.outputs.nyc != ''
-      run: |
-        if [[ -d ./coverage ]]; then
-          mv ./coverage "./${{ matrix.name }}"
-          mkdir ./coverage
-          mv "./${{ matrix.name }}" "./coverage/${{ matrix.name }}"
-        fi
-
-    - name: Upload code coverage
-      uses: actions/upload-artifact@v3
-      if: steps.list_env.outputs.nyc != ''
-      with:
-        name: coverage
-        path: ./coverage
-        retention-days: 1
-
-  coverage:
-    needs: test
+  pack:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v4
 
-    - name: Install lcov
-      shell: bash
-      run: sudo apt-get -y install lcov
-
-    - name: Collect coverage reports
-      uses: actions/download-artifact@v3
+    - name: Install Node.js
+      uses: actions/setup-node@v4
       with:
-        name: coverage
-        path: ./coverage
+        node-version: "22.5.1"
 
-    - name: Merge coverage reports
-      shell: bash
-      run: find ./coverage -name lcov.info -exec printf '-a %q\n' {} \; | xargs lcov -o ./coverage/lcov.info
+    - name: Pack
+      run: |
+        node -v
+        npm -v
+        npm pack
 
-    - name: Upload coverage report
-      uses: coverallsapp/github-action@master
+    - name: Upload package tarball
+      uses: actions/upload-artifact@v4
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        name: npm-tarball
+        path: ./body-parser-*.tgz
+        if-no-files-found: error
